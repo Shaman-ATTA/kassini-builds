@@ -1,0 +1,44 @@
+name: Lia Assistant Windows
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['lia-assistant/**', '.github/workflows/lia-assistant-windows.yml']
+    branches: ['main', 'cursor/**']
+  tags: ['lia-desktop-v*']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: lia-assistant/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install edge-tts
+      - run: npm install
+      - run: npx playwright install chromium
+      - run: npm run pack:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiaAssistant-Windows-x64
+          path: |
+            lia-assistant/desktop/release/*.exe
+            lia-assistant/desktop/release/*.zip
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            lia-assistant/desktop/release/*.exe
+            lia-assistant/desktop/release/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
