@@ -249,6 +249,19 @@ function registerIpc() {
     const p = assetsPath('models', 'lia_holo_mesh.bin')
     return fs.existsSync(p) ? p : path.join(__dirname, '..', 'public', 'models', 'lia_holo_mesh.bin')
   })
+  ipcMain.handle('assets:meshBytes', () => {
+    const candidates = [
+      assetsPath('models', 'lia_holo_mesh.bin'),
+      path.join(app.getAppPath(), 'dist', 'models', 'lia_holo_mesh.bin'),
+      path.join(app.getAppPath(), 'public', 'models', 'lia_holo_mesh.bin'),
+      path.join(__dirname, '..', 'public', 'models', 'lia_holo_mesh.bin'),
+      path.join(__dirname, '..', 'assets', 'models', 'lia_holo_mesh.bin'),
+    ]
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return fs.readFileSync(p)
+    }
+    throw new Error('lia_holo_mesh.bin not found in ' + candidates.join(' | '))
+  })
 
   ipcMain.handle('shell:openPath', (_e, p: string) => shell.openPath(p))
   ipcMain.handle('shell:openExternal', (_e, url: string) => shell.openExternal(url))
@@ -296,6 +309,12 @@ function registerIpc() {
     },
   )
 }
+
+// Software GL fallback for CI / machines without a usable GPU
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-webgl')
+app.commandLine.appendSwitch('use-angle', 'swiftshader')
+app.commandLine.appendSwitch('enable-features', 'Vulkan,DefaultANGLEVulkan')
 
 app.whenReady().then(() => {
   const cfg = loadConfig()

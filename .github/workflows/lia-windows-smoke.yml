@@ -36,7 +36,7 @@ jobs:
           if (-not $exe) { throw "portable exe not found" }
           Write-Host "Launching $($exe.FullName)"
           $p = Start-Process -FilePath $exe.FullName -PassThru
-          Start-Sleep -Seconds 14
+          Start-Sleep -Seconds 22
           Add-Type -AssemblyName System.Windows.Forms
           Add-Type -AssemblyName System.Drawing
           $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds

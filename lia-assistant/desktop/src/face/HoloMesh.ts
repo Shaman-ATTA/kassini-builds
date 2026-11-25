@@ -46,9 +46,7 @@ export class HoloMesh {
     return dest
   }
 
-  static async load(url: string): Promise<HoloMesh> {
-    const res = await fetch(url)
-    const buf = await res.arrayBuffer()
+  static fromArrayBuffer(buf: ArrayBuffer): HoloMesh {
     const view = new DataView(buf)
     let o = 0
     const metaLen = view.getInt32(o, true)
@@ -109,5 +107,19 @@ export class HoloMesh {
       mouthHalfW: halfW,
       mouthZ,
     })
+  }
+
+  static async load(url: string): Promise<HoloMesh> {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`mesh fetch ${res.status} ${url}`)
+    return HoloMesh.fromArrayBuffer(await res.arrayBuffer())
+  }
+
+  static fromBytes(bytes: ArrayBuffer | Uint8Array): HoloMesh {
+    const buf =
+      bytes instanceof ArrayBuffer
+        ? bytes
+        : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    return HoloMesh.fromArrayBuffer(buf as ArrayBuffer)
   }
 }
