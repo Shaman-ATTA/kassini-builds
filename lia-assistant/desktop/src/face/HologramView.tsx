@@ -199,7 +199,23 @@ export function HologramView({ mouth, speaking }: Props) {
 
     ;(async () => {
       try {
-        holo = await HoloMesh.load('/models/lia_holo_mesh.bin')
+        // Packaged Electron uses file:// — absolute "/models/..." 404s. Prefer relative.
+        const candidates = [
+          new URL('models/lia_holo_mesh.bin', document.baseURI).href,
+          './models/lia_holo_mesh.bin',
+          'models/lia_holo_mesh.bin',
+        ]
+        let lastErr: unknown
+        for (const url of candidates) {
+          try {
+            holo = await HoloMesh.load(url)
+            lastErr = null
+            break
+          } catch (e) {
+            lastErr = e
+          }
+        }
+        if (!holo) throw lastErr ?? new Error('mesh load failed')
         const geo = new THREE.BufferGeometry()
         scratch.arr = new Float32Array(holo.basePositions)
         geo.setAttribute('position', new THREE.BufferAttribute(scratch.arr, 3))
