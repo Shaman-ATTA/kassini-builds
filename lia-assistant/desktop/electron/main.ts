@@ -252,6 +252,49 @@ function registerIpc() {
 
   ipcMain.handle('shell:openPath', (_e, p: string) => shell.openPath(p))
   ipcMain.handle('shell:openExternal', (_e, url: string) => shell.openExternal(url))
+
+  ipcMain.on('debug:mouth', (_e, mouth) => {
+    mainWindow?.webContents.send('debug:mouth', mouth)
+  })
+
+  ipcMain.handle(
+    'tools:run-plan',
+    async (_e, plan: { name: string; args: Record<string, string> }[]) => {
+      const cfg = loadConfig()
+      const ctx = buildToolCtx(cfg)
+      aborted = false
+      showControlBanner(true)
+      const results: unknown[] = []
+      try {
+        const { runTool } = await import('./agent/tools')
+        for (const step of plan) {
+          if (aborted) break
+          mainWindow?.webContents.send('agent:event', {
+            type: 'tool_start',
+            tool: step.name,
+            args: step.args,
+          })
+          log(`tool:${step.name} ${JSON.stringify(step.args)}`)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await (runTool as any)(step.name, step.args, ctx)
+          results.push({ tool: step.name, result })
+          mainWindow?.webContents.send('agent:event', {
+            type: 'tool_end',
+            tool: step.name,
+            result,
+          })
+        }
+        mainWindow?.webContents.send('agent:event', { type: 'done', text: 'Готово.' })
+        return { ok: true, results }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        mainWindow?.webContents.send('agent:event', { type: 'error', text: msg })
+        return { ok: false, error: msg, results }
+      } finally {
+        showControlBanner(false)
+      }
+    },
+  )
 }
 
 app.whenReady().then(() => {

@@ -1,0 +1,56 @@
+name: Lia Windows EXE smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'lia-assistant/desktop/**'
+      - '.github/workflows/lia-windows-smoke.yml'
+    branches: ['cursor/**', 'main']
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: lia-assistant/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install edge-tts
+      - name: npm install + pack portable
+        run: |
+          npm install
+          npm run pack:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Launch EXE and capture screenshot
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "release" -Filter "LiaAssistant-*-win-x64.exe" | Select-Object -First 1
+          if (-not $exe) { throw "portable exe not found" }
+          Write-Host "Launching $($exe.FullName)"
+          $p = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 14
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $out = Join-Path $env:GITHUB_WORKSPACE "desktop_windows_runner.png"
+          $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+          Write-Host "Saved $out size=$((Get-Item $out).Length)"
+          try { Stop-Process -Id $p.Id -Force } catch {}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lia-windows-smoke
+          path: |
+            desktop_windows_runner.png
+            lia-assistant/desktop/release/*.exe
+            lia-assistant/desktop/release/*.zip

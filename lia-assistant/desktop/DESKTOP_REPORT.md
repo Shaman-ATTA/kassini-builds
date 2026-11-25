@@ -77,3 +77,9 @@ npx playwright install chromium
 npm run dev            # Electron + Vite
 npm run pack:win       # Windows zip + portable (set CSC_IDENTITY_AUTO_DISCOVERY=false)
 ```
+
+## GitHub Release (>25MB)
+
+https://github.com/Shaman-ATTA/kassini-builds/releases/tag/lia-desktop-v0.1.0
+
+Artifacts: `LiaAssistant-0.1.0-win-x64.exe` (portable) and `.zip`. Windows CI workflow also lives in that repo under `.github/workflows/lia-assistant-windows.yml`.

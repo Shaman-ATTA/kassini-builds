@@ -17,6 +17,10 @@ const api = {
   meshPath: () => ipcRenderer.invoke('assets:meshPath'),
   openPath: (p: string) => ipcRenderer.invoke('shell:openPath', p),
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
+  runTools: (plan: { name: string; args: Record<string, string> }[]) =>
+    ipcRenderer.invoke('tools:run-plan', plan),
+  setMouth: (mouth: { jaw: number; funnel?: number; wide?: number; speaking?: boolean }) =>
+    ipcRenderer.send('debug:mouth', mouth),
   on: (channel: string, cb: (...args: unknown[]) => void) => {
     const listener = (_: Electron.IpcRendererEvent, ...args: unknown[]) => cb(...args)
     ipcRenderer.on(channel, listener)

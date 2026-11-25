@@ -7,7 +7,8 @@ import './styles/app.css'
 type Tab = 'home' | 'dialog' | 'agent' | 'more'
 type VoiceState = 'IDLE' | 'LISTENING' | 'THINKING' | 'SPEAKING'
 
-const GREETING = 'Доброй ночи, сэр.\nЯ готова к диалогу и локальным навыкам.'
+const GREETING_TITLE = 'Доброй ночи, сэр.'
+const GREETING_SUB = 'Я готова к диалогу и локальным навыкам.'
 
 const STOP_RE = /лиа[,\s]+стоп/i
 
@@ -15,7 +16,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('home')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [voice, setVoice] = useState<VoiceState>('IDLE')
-  const [statusSub, setStatusSub] = useState('Нажмите микрофон или скажите «Лиа»')
+  const [statusSub, setStatusSub] = useState('Скажите «Лиа» или нажмите микрофон')
   const [transcript, setTranscript] = useState('')
   const [log, setLog] = useState<string[]>([])
   const [controlling, setControlling] = useState(false)
@@ -29,7 +30,7 @@ export default function App() {
   const speakStartedAt = useRef(0)
 
   const pushLog = useCallback((line: string) => {
-    setLog((prev) => [...prev.slice(-80), line])
+    setLog((prev) => [...prev.slice(-120), line])
   }, [])
 
   const playNext = useCallback(() => {
@@ -51,7 +52,7 @@ export default function App() {
       window.lia.on('voice:state', (p) => {
         const s = p as { state: VoiceState; text?: string }
         setVoice(s.state)
-        if (s.text) setStatusSub(s.text.slice(0, 80))
+        if (s.text) setStatusSub(s.text.slice(0, 100))
       }),
       window.lia.on('voice:audio-chunk', (p) => {
         const c = p as { path: string; index: number; dataUrl?: string }
@@ -79,11 +80,20 @@ export default function App() {
       }),
       window.lia.on('agent:log', (line) => pushLog(String(line))),
       window.lia.on('agent:event', (ev) => {
-        const e = ev as { type: string; text?: string; tool?: string }
+        const e = ev as { type: string; text?: string; tool?: string; args?: unknown; result?: unknown }
         if (e.type === 'tool_start') setControlling(true)
         if (e.type === 'done' || e.type === 'abort' || e.type === 'error') setControlling(false)
-        if (e.text) pushLog(`${e.type}: ${e.text}`)
-        if (e.tool) pushLog(`${e.type}: ${e.tool}`)
+        if (e.type === 'tool_start' && e.tool) {
+          pushLog(`→ ${e.tool}${e.args ? ' ' + JSON.stringify(e.args) : ''}`)
+        } else if (e.type === 'tool_end' && e.tool) {
+          const summary =
+            e.result && typeof e.result === 'object'
+              ? JSON.stringify(e.result).slice(0, 180)
+              : String(e.result ?? 'ok')
+          pushLog(`✓ ${e.tool}: ${summary}`)
+        } else if (e.text) {
+          pushLog(`${e.type}: ${e.text}`)
+        }
       }),
       window.lia.on('agent:confirm', (p) => {
         setConfirmPrompt((p as { prompt: string }).prompt)
@@ -95,6 +105,18 @@ export default function App() {
         setStatusSub('Остановлено')
         audioRef.current?.pause()
         queueRef.current = []
+      }),
+      // Capture harness: force mouth open without audio
+      window.lia.on('debug:mouth', (p) => {
+        const m = p as { jaw: number; funnel?: number; wide?: number; speaking?: boolean }
+        if (m.speaking) setVoice('SPEAKING')
+        else if (m.jaw <= 0.05) setVoice('IDLE')
+        setMouth({
+          jaw: m.jaw,
+          funnel: m.funnel ?? 0,
+          wide: m.wide ?? 0,
+        })
+        if (m.speaking) setStatusSub('Демо анимации рта')
       }),
     ]
     return () => offs.forEach((off) => off())
@@ -108,45 +130,31 @@ export default function App() {
       raf = requestAnimationFrame(loop)
       const t = performance.now() - speakStartedAt.current
       const text = speakTextRef.current
+      if (!text) {
+        // Forced open for capture / silent demo
+        const amp = 0.72 + 0.12 * Math.sin(t / 160)
+        setMouth({ jaw: Math.min(0.58, amp * 0.55), funnel: 0, wide: 0.15 })
+        return
+      }
       const b = boundariesRef.current.find(
-        (x) => t >= x.offsetMs && t <= x.offsetMs + Math.max(80, x.durationMs),
+        (x) => t >= x.offsetMs && t <= x.offsetMs + Math.max(90, x.durationMs),
       )
-      const amp = 0.55 + 0.35 * Math.abs(Math.sin(t / 140))
+      const amp = 0.62 + 0.28 * Math.abs(Math.sin(t / 130))
       if (b) {
         void window.lia.visemeShape(text, b.charStart, b.charEnd, amp).then((m) => {
-          setMouth({ jaw: m.jaw, funnel: m.funnel, wide: m.wide })
+          setMouth({ jaw: Math.max(0.35, m.jaw), funnel: m.funnel, wide: m.wide })
         })
       } else {
-        setMouth((prev) => ({ ...prev, jaw: Math.max(0.08, prev.jaw * 0.9) }))
+        setMouth((prev) => ({
+          jaw: Math.max(0.28, prev.jaw * 0.92),
+          funnel: prev.funnel * 0.9,
+          wide: prev.wide * 0.9,
+        }))
       }
     }
     loop()
     return () => cancelAnimationFrame(raf)
   }, [voice])
-
-  const onSpeech = useCallback(
-    (r: { text: string; final: boolean }) => {
-      setTranscript(r.text)
-      if (!r.final) return
-      if (STOP_RE.test(r.text)) {
-        void window.lia.abortAgent()
-        void window.lia.stopSpeak()
-        setStatusSub('Остановлено по команде')
-        return
-      }
-      // Interrupt speaking
-      if (voice === 'SPEAKING') {
-        void window.lia.stopSpeak()
-        audioRef.current?.pause()
-        queueRef.current = []
-      }
-      void handleUserText(r.text)
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [voice],
-  )
-
-  const { supported, listening, start, stop } = useSpeechRecognition(onSpeech)
 
   const handleUserText = async (text: string) => {
     const t = text.trim()
@@ -160,6 +168,29 @@ export default function App() {
       setControlling(false)
     }
   }
+
+  const onSpeech = useCallback(
+    (r: { text: string; final: boolean }) => {
+      setTranscript(r.text)
+      if (!r.final) return
+      if (STOP_RE.test(r.text)) {
+        void window.lia.abortAgent()
+        void window.lia.stopSpeak()
+        setStatusSub('Остановлено по команде')
+        return
+      }
+      if (voice === 'SPEAKING') {
+        void window.lia.stopSpeak()
+        audioRef.current?.pause()
+        queueRef.current = []
+      }
+      void handleUserText(r.text)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [voice],
+  )
+
+  const { supported, listening, start, stop } = useSpeechRecognition(onSpeech)
 
   const toggleMic = () => {
     if (listening) stop()
@@ -199,13 +230,13 @@ export default function App() {
         </div>
       </header>
 
+      <div className="greeting-block">
+        <div className="greeting-title">{GREETING_TITLE}</div>
+        <div className="greeting-sub">{GREETING_SUB}</div>
+      </div>
+
       <div className="main">
         <div className="stage-wrap">
-          <div className="greeting">
-            {GREETING.split('\n').map((l) => (
-              <div key={l}>{l}</div>
-            ))}
-          </div>
           <HologramView mouth={mouth} speaking={voice === 'SPEAKING'} />
           <div className={`status ${voice === 'SPEAKING' ? 'speaking' : ''}`}>
             {statusLine.toUpperCase()}
@@ -230,24 +261,23 @@ export default function App() {
                 }}
               />
               <button
-                className="btn"
+                className="btn send"
                 onClick={() => {
                   void handleUserText(textInput)
                   setTextInput('')
                 }}
+                aria-label="Отправить"
               >
                 →
               </button>
             </div>
             {!supported && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '.75rem' }}>
-                Web Speech недоступен — используйте текстовый ввод (Vosk можно добавить позже).
-              </p>
+              <p className="hint">Web Speech недоступен — используйте текстовый ввод.</p>
             )}
           </div>
-          <div className="panel" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div className="panel log-panel">
             <h3>Журнал действий</h3>
-            <div className="log">
+            <div className="log" data-testid="action-log">
               {log.length === 0 && <div>Пока пусто</div>}
               {log.map((l, i) => (
                 <div key={i}>{l}</div>
@@ -257,33 +287,45 @@ export default function App() {
         </aside>
       </div>
 
-      <footer className="bottom">
-        <div className="tabs">
-          <button className={`tab ${tab === 'home' ? 'active' : ''}`} onClick={() => setTab('home')}>
-            Главная
+      <footer className="bottom-bar">
+        <nav className="nav-glass">
+          <button className={`nav-item ${tab === 'home' ? 'active' : ''}`} onClick={() => setTab('home')}>
+            <span className="nav-ico" aria-hidden>
+              ▦
+            </span>
+            <span>Главная</span>
           </button>
-          <button className={`tab ${tab === 'dialog' ? 'active' : ''}`} onClick={() => setTab('dialog')}>
-            Диалог
+          <button className={`nav-item ${tab === 'dialog' ? 'active' : ''}`} onClick={() => setTab('dialog')}>
+            <span className="nav-ico" aria-hidden>
+              ◢
+            </span>
+            <span>Диалог</span>
           </button>
-        </div>
-        <div className="mic-wrap">
-          <button className={`mic ${listening ? 'active' : ''}`} onClick={toggleMic} aria-label="Микрофон" />
-          <span className="mic-label">{listening ? 'Слушаю…' : 'Микрофон'}</span>
-        </div>
-        <div className="tabs right">
-          <button className={`tab ${tab === 'agent' ? 'active' : ''}`} onClick={() => setTab('agent')}>
-            Агент
+
+          <div className="mic-slot">
+            <button className={`mic ${listening ? 'active' : ''}`} onClick={toggleMic} aria-label="Микрофон" />
+            <span className="mic-label">{listening ? 'Слушаю…' : 'Микрофон'}</span>
+          </div>
+
+          <button className={`nav-item ${tab === 'agent' ? 'active' : ''}`} onClick={() => setTab('agent')}>
+            <span className="nav-ico" aria-hidden>
+              △
+            </span>
+            <span>Агент</span>
           </button>
           <button
-            className={`tab ${tab === 'more' ? 'active' : ''}`}
+            className={`nav-item ${tab === 'more' ? 'active' : ''}`}
             onClick={() => {
               setTab('more')
               setSettingsOpen(true)
             }}
           >
-            Ещё
+            <span className="nav-ico" aria-hidden>
+              ···
+            </span>
+            <span>Ещё</span>
           </button>
-        </div>
+        </nav>
       </footer>
 
       {confirmPrompt && (
