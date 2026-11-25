@@ -28,7 +28,7 @@ jobs:
           npm install
           npm run pack:win
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
       - name: Launch EXE and capture screenshot
         shell: pwsh
         run: |
