@@ -36,7 +36,46 @@ jobs:
           if (-not $exe) { throw "portable exe not found" }
           Write-Host "Launching $($exe.FullName)"
           $p = Start-Process -FilePath $exe.FullName -PassThru
-          Start-Sleep -Seconds 22
+          Start-Sleep -Seconds 25
+
+          Add-Type @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public class Win {
+            public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc lpEnumFunc, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+          }
+          "@
+
+          $target = [IntPtr]::Zero
+          [Win]::EnumWindows({
+            param($h,$l)
+            if (-not [Win]::IsWindowVisible($h)) { return $true }
+            $sb = New-Object System.Text.StringBuilder 256
+            [void][Win]::GetWindowText($h, $sb, $sb.Capacity)
+            $t = $sb.ToString()
+            if ($t -like "*Lia Assistant*") {
+              $script:target = $h
+              return $false
+            }
+            return $true
+          }, [IntPtr]::Zero)
+
+          if ($target -eq [IntPtr]::Zero) {
+            Write-Host "Lia window not found; handles:"
+            Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { Write-Host $_.Id $_.MainWindowTitle }
+          } else {
+            [void][Win]::ShowWindow($target, 3) # maximize
+            Start-Sleep -Milliseconds 400
+            [void][Win]::SetForegroundWindow($target)
+            Start-Sleep -Seconds 2
+          }
+
           Add-Type -AssemblyName System.Windows.Forms
           Add-Type -AssemblyName System.Drawing
           $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -46,7 +85,7 @@ jobs:
           $out = Join-Path $env:GITHUB_WORKSPACE "desktop_windows_runner.png"
           $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
           Write-Host "Saved $out size=$((Get-Item $out).Length)"
-          try { Stop-Process -Id $p.Id -Force } catch {}
+          Get-Process | Where-Object { $_.ProcessName -match "Lia|electron" } | Stop-Process -Force -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v4
         with:
           name: lia-windows-smoke
